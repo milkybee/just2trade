@@ -6,7 +6,7 @@ at http://www.just2trade.com/trading_tools/api.
 Note, you must have a trading account in order to access the API.
 """
 
-VERSION = (0, 9, 0)
+VERSION = (0, 9, 1)
 __version__ = '.'.join(map(str, VERSION))
 
 
@@ -395,7 +395,7 @@ class Order(object):
     def is_filled(self):
         return self.status == ORDER_STATUS_FILLED
     
-    def cancel(self, block=True):
+    def cancel(self, block=True, block_until_sent=True):
         """
         Note: tag 41 contains the unique order identifier assigned by the API
         server. This instruction will be a request to cancel all remaining
@@ -416,6 +416,14 @@ class Order(object):
         })
         self.response = None
         self.api.push_outgoing(message)
+        if block_until_sent:
+            # Wait until our message is sent.
+            # We don't necessarily care yet if we receive a response.
+            while 1:
+                if not self.api.pending_outgoing(message):
+                    break
+                LOG.info('Waiting for message to be sent...')
+                time.sleep(1)
         if block:
             # Wait until order cancelled or explicit cancellation failure.
             while 1:
@@ -493,6 +501,8 @@ class J2T(object):
         self._in_queue = []
         self._in_queue_lock = Lock()
         
+        self._last_message_time = None
+        
         self._accounts = {}
         
         # Orders we've sent to the server but are waiting to get
@@ -500,6 +510,12 @@ class J2T(object):
         self._pending_orders = {} # {symbol:order}
         
         self._orders = {} # {order_id:order}
+        
+        self._positions = {} # {account_number: {symbol: message}}
+    
+    @property
+    def orders(self):
+        return self._orders
     
     @property
     def serverkey(self):
@@ -526,6 +542,13 @@ class J2T(object):
     def destination(self):
         return self._current_destination
     
+    @property
+    def positions(self):
+        """
+        Returns positions for the currently selected account number.
+        """
+        return self._positions[self.account_number]
+    
     def on_A(self, message):
         """
         Handle logon response.
@@ -536,6 +559,15 @@ class J2T(object):
             error_message = errors[status]
             raise Exception, error_message
         self._logged_on = True
+    
+    def on_yr(self, message):
+        """
+        Handle MESSAGE_TYPE_POSITION_REPORT.
+        """
+        account_number = message[USER_ACCOUNT_NUMBER]
+        symbol = message[SYMBOL]
+        self._positions.setdefault(account_number, {})
+        self._positions[account_number][symbol] = message
     
     def on_br(self, message):
         """
@@ -582,6 +614,9 @@ class J2T(object):
         order.response = message
     
     def push_outgoing(self, message):
+        """
+        Queues a message to be sent.
+        """
         assert isinstance(message, Message)
         self._out_queue_lock.acquire()
         try:
@@ -589,7 +624,22 @@ class J2T(object):
         finally:
             self._out_queue_lock.release()
     
+    def pending_outgoing(self, message):
+        """
+        Returns true if message has not yet been sent.
+        Returns false otherwise.
+        """
+        assert isinstance(message, Message)
+        self._out_queue_lock.acquire()
+        try:
+            return message in self._out_queue
+        finally:
+            self._out_queue_lock.release()
+            
     def pop_outgoing(self):
+        """
+        Retrieves the oldest message received.
+        """
         self._out_queue_lock.acquire()
         try:
             if self._out_queue:
@@ -598,6 +648,9 @@ class J2T(object):
             self._out_queue_lock.release()
     
     def push_incoming(self, message):
+        """
+        Adds a received message to the incoming queue.
+        """
         assert isinstance(message, Message)
         self._in_queue_lock.acquire()
         try:
@@ -606,6 +659,9 @@ class J2T(object):
             self._in_queue_lock.release()
     
     def pop_incoming(self):
+        """
+        Retrieves the oldest message received.
+        """
         self._in_queue_lock.acquire()
         try:
             if self._in_queue:
@@ -669,6 +725,7 @@ class J2T(object):
         Manages I/O on the socket.
         """
         self._running = True
+        self._last_message_time = None
         while self._running:
             inputready, outputready, exceptready = select.select(
                 [self._connection],
@@ -679,6 +736,7 @@ class J2T(object):
             
             if inputready:
                 message = self.get_message()
+                self._last_message_time = time.time()
                 LOG.info('Received: %s' % message)
                 mt = message[MESSAGE_TYPE]
                 callback_func_name = 'on_%s' % mt
@@ -696,7 +754,10 @@ class J2T(object):
                     time.sleep(timeout)
         LOG.info('Connection handler terminated.')
 
-    def connect(self, timeout=1, wait_for_report=True):
+    def connect(self,
+        timeout=1,
+        wait_for_report=True,
+        message_wait_seconds = 10):
         """
         Establishes a connection to the API server.
         """
@@ -734,6 +795,17 @@ class J2T(object):
         if wait_for_report:
             LOG.info('Waiting for account report...')
             self.wait_for_message(**{MESSAGE_TYPE: MESSAGE_TYPE_ACCOUNT_REPORT})
+            
+            while 1:
+                LOG.info('Waiting to receive all messages...')
+                if self._last_message_time is None:
+                    pass
+                else:
+                    td = (time.time() - self._last_message_time)
+                    if td >= message_wait_seconds:
+                        LOG.info('No messages received for %i seconds.' % message_wait_seconds)
+                        break
+                time.sleep(1)
         
     def disconnect(self):
         if self._connection:
