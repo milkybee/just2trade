@@ -6,9 +6,8 @@ at http://www.just2trade.com/trading_tools/api.
 Note, you must have a trading account in order to access the API.
 """
 
-VERSION = (0, 9, 1)
+VERSION = (0, 9, 2)
 __version__ = '.'.join(map(str, VERSION))
-
 
 import logging
 import os
@@ -70,6 +69,8 @@ TAGS = dict(
     
     USERNAME = '50',
     
+    HEARTBEAT_TIMESTAMP = '52',#UNDOCUMENTED AS OF 2013-2-11
+    
     SIDE_OF_ORDER = '54',
     
     SYMBOL = '55',
@@ -116,12 +117,21 @@ TAGS = dict(
     MARGIN_TRADE_BALANCE = '13003',
     
     INTERNAL_USE = '13005',
+    
+    # current daytrading buying power available
+    INTERNAL_USE2 = '13008',
+    
+    # buying power multiplier
+    # 1 (cash account)
+    # 2 (margin account)
+    # 4 (if you have been designated as a daytrader)
+    INTERNAL_USE3 = '13009',
 )
 TAG_VALUE_TO_NAME = {}
 for _k, _v in TAGS.iteritems():
     exec '%s = %s' % (_k, repr(_v))
     TAG_VALUE_TO_NAME[_v] = _k
-TAG_VALUES = TAGS.values()
+TAG_VALUES = TAGS.values() # {tag: tag_name}
 
 ACCOUNT_TYPE_VALUES = dict(
     ACCOUNT_TYPE_CASH = 1,
@@ -317,7 +327,9 @@ class Message(dict):
             elif k in DECIMAL_FIELDS:
                 v = Decimal(v)
                 
-            assert k in TAG_VALUES, 'Invalid tag: %s' % (k,)
+            assert k in TAG_VALUES, \
+                'Invalid tag: [%s] (type=%s)\nMust be one of:\n%s' \
+                    % (k, type(k).__name__, '\n'.join(sorted(TAG_VALUES)))
             msg[k] = v
         return msg
     
