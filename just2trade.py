@@ -238,9 +238,37 @@ DECIMAL_FIELDS = (
     STOP_PRICE,
 )
 
-logging.basicConfig()
-LOG = logging.getLogger(__file__)
-LOG.setLevel(logging.INFO)
+#logging.basicConfig()
+#LOG = logging.getLogger(__file__)
+#LOG.setLevel(logging.INFO)
+#
+#class InfoFilter(logging.Filter):
+#    def filter(self, rec):
+#        return rec.levelno in (logging.DEBUG, logging.INFO)
+
+# Ensure .info() goes to stdout, not the default stderr.
+#TODO:fix? neither solutions work? Calls to LOG.info() still go to stderr?!
+#solution1
+#h1 = logging.StreamHandler(sys.__stdout__)
+#h1.setLevel(logging.INFO)
+#h1.addFilter(InfoFilter())
+#LOG.addHandler(h1)
+#solution2
+#ch = logging.StreamHandler(sys.__stdout__)
+#ch.setLevel(logging.INFO)
+#LOG.addHandler(ch)
+
+class Logger(object):
+    
+    def info(self, *args):
+        s = ' '.join(map(str, args))
+        print s
+    
+    def error(self, *args):
+        s = ' '.join(map(str, args))
+        print>>sys.__stderr__, s
+        
+LOG = Logger()
 
 class XmlListConfig(list):
     def __init__(self, aList):
@@ -557,9 +585,10 @@ class J2T(object):
     @property
     def positions(self):
         """
-        Returns positions for the currently selected account number.
+        Returns positions for the currently selected account number,
+        in the form {symbol:data}.
         """
-        return self._positions[self.account_number]
+        return self._positions.get(self.account_number, {})
     
     def on_A(self, message):
         """
@@ -703,7 +732,7 @@ class J2T(object):
                 'serviceAPIAuthenticator.cgi?user=%(user)s&device=API' + \
                 '&password=%(password)s',
         }[self.mode]) % args
-        LOG.info('Retrieving %s...' % url)
+        LOG.info('Retrieving authentication URL...')
         xml_response = urllib2.urlopen(url).read()
         LOG.info('Processing response...')
         root = ElementTree.XML(xml_response)
