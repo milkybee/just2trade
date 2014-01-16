@@ -6,7 +6,7 @@ at http://www.just2trade.com/trading_tools/api.
 Note, you must have a trading account in order to access the API.
 """
 
-VERSION = (0, 9, 2)
+VERSION = (0, 9, 3)
 __version__ = '.'.join(map(str, VERSION))
 
 import logging
